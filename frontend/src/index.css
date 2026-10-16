@@ -1,0 +1,80 @@
+:root {
+  --evening: #d24136;
+  --honey: #eb8a3e;
+  --biscotti: #ebb582;
+  --stone: #785a46;
+  --latte: #c9b7a8;
+  --caramel: #ebd2b0;
+  --cream: #f7ede0;
+  --ink: #3f2e24;
+  --on-stone: #f7ede0;
+  --error: #9a2b22;
+  --shadow: 0 2px 10px rgba(63, 46, 36, 0.14);
+  --font: 'Golos Text', system-ui, sans-serif;
+  --logo: 'Shantell Sans', 'Golos Text', system-ui, sans-serif;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --control: 48px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--caramel);
+  color: var(--ink);
+  font: 16px / 1.5 var(--font);
+}
+
+body {
+  overscroll-behavior: contain;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+::selection {
+  background: var(--evening);
+  color: var(--cream);
+}
+
+:focus-visible {
+  outline: 2px solid var(--evening);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
