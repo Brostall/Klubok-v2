@@ -150,6 +150,7 @@ function snapshot(room) {
     code: room.code,
     trackId: room.trackId,
     playing: room.playing,
+    looping: Boolean(room.looping),
     position: mediaPosition(room),
     at: now(),
     tracks: room.tracks,
@@ -158,6 +159,7 @@ function snapshot(room) {
       role: client.role,
       name: client.name,
     })),
+    chat: room.chat ?? [],
   }
 }
 
@@ -182,9 +184,11 @@ function createRoom() {
     hostSecret: crypto.randomBytes(16).toString('hex'),
     trackId: CATALOG[0].id,
     playing: false,
+    looping: false,
     position: 0,
     at: now(),
     tracks: CATALOG.map((item) => ({ ...item })),
+    chat: [],
     clients: new Map(),
   }
   rooms.set(code, room)
@@ -281,7 +285,9 @@ app.post('/api/rooms/:code/tracks', (req, res) => {
       res.status(400).json({ error: 'Выберите аудиофайл.' })
       return
     }
-    const duration = Number(req.body?.duration) || wavDuration(req.file.path) || 180
+    const probed = m4aDuration(req.file.path) || wavDuration(req.file.path)
+    const fromClient = Math.round(Number(req.body?.duration))
+    const duration = probed || (fromClient > 0 ? fromClient : 180)
     const title = String(req.body?.title || req.file.originalname || 'Свой файл').slice(0, 80)
     const colors = ['#d24136', '#eb8a3e', '#ebb582', '#785a46']
     const track = {
@@ -373,6 +379,22 @@ wss.on('connection', (ws) => {
       return
     }
 
+    if (msg.type === 'chat') {
+      const text = String(msg.text || '').trim().slice(0, 300)
+      if (!text) return
+      const stamp = new Date()
+      room.chat.push({
+        id: crypto.randomBytes(4).toString('hex'),
+        senderId: client.id,
+        name: client.name,
+        text,
+        time: `${stamp.getHours()}:${stamp.getMinutes().toString().padStart(2, '0')}`,
+      })
+      if (room.chat.length > 80) room.chat = room.chat.slice(-80)
+      broadcast(room, snapshot(room))
+      return
+    }
+
     if (client.role !== 'host') return
 
     if (msg.type === 'play') {
@@ -395,6 +417,12 @@ wss.on('connection', (ws) => {
       room.position = Number(msg.position) || 0
       room.at = now()
       if (typeof msg.playing === 'boolean') room.playing = msg.playing
+      broadcast(room, snapshot(room))
+      return
+    }
+
+    if (msg.type === 'loop') {
+      room.looping = Boolean(msg.looping)
       broadcast(room, snapshot(room))
       return
     }

@@ -16,6 +16,28 @@ const DRIFT = 0.12
 
 type Socket = ReturnType<typeof createSocket>
 
+async function writeClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.setAttribute('readonly', '')
+      area.style.position = 'fixed'
+      area.style.left = '-9999px'
+      document.body.appendChild(area)
+      area.select()
+      const ok = document.execCommand('copy')
+      area.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
 export function useRoom() {
   const [screen, setScreen] = useState<'home' | 'room'>('home')
   const [role, setRole] = useState<Role>('host')
@@ -24,6 +46,7 @@ export function useRoom() {
   const [joinError, setJoinError] = useState('')
   const [copyLabel, setCopyLabel] = useState('Скопировать ссылку')
   const [shareOrigin, setShareOrigin] = useState(() => location.origin)
+  const [selfId, setSelfId] = useState('')
   const [guestName, setGuestName] = useState('')
   const [armed, setArmed] = useState(false)
   const [uiNow, setUiNow] = useState(0)
@@ -33,6 +56,7 @@ export function useRoom() {
   const roleRef = useRef<Role>('host')
   const armedRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const lifeRef = useRef(0)
 
   const getAudio = () => {
     if (!audioRef.current) {
@@ -50,12 +74,18 @@ export function useRoom() {
     const offset = socketRef.current?.offset() ?? 0
     const want = Math.max(0, Math.min(track.duration, expectedPosition(state, offset)))
     const afterReady = () => {
+      el.loop = Boolean(state.looping)
       if (Math.abs(el.currentTime - want) > (state.playing ? DRIFT : 0.04)) {
         el.currentTime = want
       }
       if (isHost) return
       if (state.playing && armedRef.current) {
-        void el.play().catch(() => {})
+        void el.play().catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === 'NotAllowedError') {
+            armedRef.current = false
+            setArmed(false)
+          }
+        })
       } else if (!el.paused) {
         el.pause()
       }
@@ -72,9 +102,10 @@ export function useRoom() {
       return
     }
     afterReady()
-  }, [])
+  }, [setArmed])
 
   const disconnect = useCallback(() => {
+    lifeRef.current += 1
     socketRef.current?.close()
     socketRef.current = null
     stateRef.current = null
@@ -92,21 +123,33 @@ export function useRoom() {
     async (nextCode: string, hostSecret?: string) => {
       if (stateRef.current?.code === nextCode && socketRef.current?.alive) return
       disconnect()
+      const life = lifeRef.current
+      setJoinError('')
       const socket = createSocket({
         onHello: (info) => {
+          if (life !== lifeRef.current) return
           roleRef.current = info.role
           setRole(info.role)
+          setSelfId(info.id)
+          setJoinError('')
+          setScreen('room')
           if (info.role === 'host') {
             armedRef.current = true
             setArmed(true)
           }
         },
         onError: (error) => {
+          if (life !== lifeRef.current) return
           setJoinError(error)
           setScreen('home')
-          window.location.hash = '#/'
+          setArmed(false)
+          armedRef.current = false
+          const hashed = Boolean(parseRoomHash())
+          disconnect()
+          if (hashed) window.location.hash = '#/'
         },
         onSync: (state) => {
+          if (life !== lifeRef.current) return
           stateRef.current = state
           setSync(state)
           setCode(state.code)
@@ -115,7 +158,16 @@ export function useRoom() {
         },
       })
       socketRef.current = socket
-      await socket.ready()
+      try {
+        await socket.ready()
+      } catch (error) {
+        if (life !== lifeRef.current) return
+        setJoinError(error instanceof Error ? error.message : 'Нет соединения с комнатой.')
+        setScreen('home')
+        if (parseRoomHash()) window.location.hash = '#/'
+        return
+      }
+      if (life !== lifeRef.current || socketRef.current !== socket) return
       socket.send({
         type: 'join',
         code: nextCode,
@@ -123,8 +175,6 @@ export function useRoom() {
         name: 'Друг',
       })
       setCode(nextCode)
-      setScreen('room')
-      setJoinError('')
     },
     [applyAudio, disconnect],
   )
@@ -207,6 +257,12 @@ export function useRoom() {
     const el = getAudio()
     const onEnded = () => {
       if (roleRef.current !== 'host') return
+      if (stateRef.current?.looping) {
+        el.currentTime = 0
+        void el.play().catch(() => {})
+        socketRef.current?.send({ type: 'play', position: 0 })
+        return
+      }
       socketRef.current?.send({ type: 'pause', position: el.currentTime })
     }
     el.addEventListener('ended', onEnded)
@@ -243,9 +299,12 @@ export function useRoom() {
 
   const goHome = () => {
     disconnect()
+    armedRef.current = false
     setArmed(false)
     setScreen('home')
-    window.location.hash = '#/'
+    setJoinError('')
+    setCopyLabel('Скопировать ссылку')
+    if (parseRoomHash()) window.location.hash = '#/'
   }
 
   const hostSend = (payload: Record<string, unknown>) => {
@@ -256,10 +315,24 @@ export function useRoom() {
   const togglePlay = async () => {
     const el = getAudio()
     if (role === 'guest') {
-      armedRef.current = true
-      setArmed(true)
       const state = stateRef.current
+      armedRef.current = true
       if (state) applyAudio(state, false)
+      const roomPlaying = Boolean(state?.playing)
+      try {
+        const pending = el.play()
+        if (!roomPlaying) el.pause()
+        await pending
+        setArmed(true)
+      } catch (error) {
+        const aborted = error instanceof DOMException && error.name === 'AbortError'
+        if (aborted && !roomPlaying) {
+          setArmed(true)
+          return
+        }
+        armedRef.current = false
+        setArmed(false)
+      }
       return
     }
     const live = stateRef.current
@@ -288,6 +361,11 @@ export function useRoom() {
     hostSend({ type: 'select', trackId: track.id })
   }
 
+  const toggleLoop = () => {
+    if (role !== 'host') return
+    hostSend({ type: 'loop', looping: !sync?.looping })
+  }
+
   const skip = (dir: -1 | 1) => {
     if (role !== 'host' || !sync) return
     const index = sync.tracks.findIndex((item) => item.id === sync.trackId)
@@ -299,13 +377,17 @@ export function useRoom() {
     const origin = await lanOrigin()
     setShareOrigin(origin)
     const url = `${origin}/${roomHash(code)}`
-    try {
-      await navigator.clipboard.writeText(url)
-    } catch {
-      window.prompt('Ссылка на комнату', url)
-    }
-    setCopyLabel('Скопировано')
+    const ok = await writeClipboard(url)
+    if (!ok) window.prompt('Ссылка на комнату', url)
+    setCopyLabel(ok ? 'Скопировано' : 'Скопируйте ссылку')
     window.setTimeout(() => setCopyLabel('Скопировать ссылку'), 1600)
+  }
+
+  const sendChat = (text: string) => {
+    const value = text.trim()
+    if (!value) return false
+    socketRef.current?.send({ type: 'chat', text: value })
+    return true
   }
 
   const onUpload = async (file: File | undefined) => {
@@ -324,6 +406,10 @@ export function useRoom() {
   const together = people.length >= 2
   const guestPerson = people.find((item) => item.role === 'guest')
   const hostPerson = people.find((item) => item.role === 'host')
+  const chat = (sync?.chat ?? []).map((item) => ({
+    ...item,
+    who: item.senderId === selfId ? 'Вы' : item.name,
+  }))
 
   return {
     screen,
@@ -350,8 +436,12 @@ export function useRoom() {
     togglePlay,
     seek,
     skip,
+    looping: Boolean(sync?.looping),
+    toggleLoop,
     selectTrack,
     copyLink,
     onUpload,
+    chat,
+    sendChat,
   }
 }

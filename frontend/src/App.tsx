@@ -1,16 +1,8 @@
 import { useState } from 'react'
 import './klubok.css'
-import { Logo, PauseIcon, PlayIcon, SendIcon, SkipIcon } from './Logo'
+import { Logo, PauseIcon, PlayIcon, RepeatIcon, SendIcon, SkipIcon, YarnMark } from './Logo'
 import { Turntable } from './Turntable'
 import { useRoom } from './useRoom'
-
-type Tab = 'rooms' | 'picks'
-
-const STARTER_CHAT = [
-  { id: 'c1', who: 'Вы', text: 'Какой вайб', time: '3:08' },
-  { id: 'c2', who: 'Друг', text: 'Пошли спать', time: '3:09' },
-  { id: 'c3', who: 'Вы', text: 'Давай следующую', time: '3:10' },
-]
 
 function formatTime(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds))
@@ -21,9 +13,7 @@ function formatTime(seconds: number) {
 
 export default function App() {
   const room = useRoom()
-  const [tab, setTab] = useState<Tab>('rooms')
   const [draft, setDraft] = useState('')
-  const [chat, setChat] = useState(STARTER_CHAT)
 
   const {
     screen,
@@ -50,9 +40,13 @@ export default function App() {
     togglePlay,
     seek,
     skip,
+    looping,
+    toggleLoop,
     selectTrack,
     copyLink,
     onUpload,
+    chat,
+    sendChat,
   } = room
 
   const guestLabel = guestPerson?.name || guestName.trim() || 'Друг'
@@ -61,18 +55,7 @@ export default function App() {
   const guestNeedsSound = role === 'guest' && !armed
 
   const send = () => {
-    const text = draft.trim()
-    if (!text) return
-    const now = new Date()
-    setChat((list) => [
-      ...list,
-      {
-        id: `c${list.length + 1}`,
-        who: role === 'host' ? 'Вы' : guestLabel,
-        text,
-        time: `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`,
-      },
-    ])
+    if (!sendChat(draft)) return
     setDraft('')
   }
 
@@ -81,34 +64,17 @@ export default function App() {
       <header className="header">
         <Logo />
         {screen === 'room' ? (
-          <>
-            <nav className="nav" aria-label="Разделы">
-              <button
-                type="button"
-                aria-current={tab === 'rooms' ? 'page' : undefined}
-                onClick={() => setTab('rooms')}
-              >
-                Комнаты
-              </button>
-              <button
-                type="button"
-                aria-current={tab === 'picks' ? 'page' : undefined}
-                onClick={() => setTab('picks')}
-              >
-                Подборка
-              </button>
-            </nav>
-            <button className="btn btn--quiet header-exit" type="button" onClick={goHome}>
-              Выйти
-            </button>
-          </>
+          <button className="btn btn--quiet header-exit" type="button" onClick={goHome}>
+            Выйти
+          </button>
         ) : null}
       </header>
 
       {screen === 'home' ? (
         <main className="home">
+          <YarnMark className="home-yarn" />
           <h1>Добрый день</h1>
-          <p>Создайте комнату или зайдите по коду.</p>
+          <p>Создать комнату или зайдите по коду</p>
           <div className="home-actions">
             <button className="btn btn--evening" type="button" onClick={() => void createRoom()}>
               Создать комнату
@@ -127,11 +93,6 @@ export default function App() {
               Присоединиться
             </button>
             {joinError ? <p className="error">{joinError}</p> : null}
-            {shareOrigin && !shareOrigin.includes('localhost') ? (
-              <p className="hint">С телефона откройте {shareOrigin} — с портом, не просто IP.</p>
-            ) : (
-              <p className="hint">Телефон должен быть в той же Wi‑Fi, что и этот ноутбук.</p>
-            )}
           </div>
         </main>
       ) : (
@@ -143,6 +104,7 @@ export default function App() {
                 className="track"
                 type="button"
                 aria-pressed={item.id === track?.id}
+                disabled={!hostLeads}
                 onClick={() => selectTrack(item)}
               >
                 <span className="cover" style={{ background: item.color }} />
@@ -153,23 +115,21 @@ export default function App() {
                 <span className="track-time">{formatTime(item.duration)}</span>
               </button>
             ))}
-            <label className="field" style={{ padding: 8 }}>
-              Свой файл
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  void onUpload(file)
-                  event.target.value = ''
-                }}
-              />
-            </label>
-            {joinError ? (
-              <p className="error" style={{ padding: '0 8px 8px' }}>
-                {joinError}
-              </p>
+            {hostLeads ? (
+              <label className="field field--upload">
+                Свой файл
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    void onUpload(file)
+                    event.target.value = ''
+                  }}
+                />
+              </label>
             ) : null}
+            {joinError ? <p className="error">{joinError}</p> : null}
           </section>
 
           <div className="center">
@@ -192,48 +152,59 @@ export default function App() {
                 <span>{formatTime(position)}</span>
                 <span>{formatTime(duration)}</span>
               </div>
+              <div className="transport">
+                <div className="now">
+                  <span>
+                    {hostLeads
+                      ? 'Вы ведёте'
+                      : guestNeedsSound
+                        ? 'Нажмите слушать, чтобы включить звук'
+                        : 'Ведёт создатель комнаты'}
+                  </span>
+                </div>
+                <div className="transport-actions">
+                  <div className="transport-main">
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      aria-label="Предыдущий"
+                      disabled={!hostLeads}
+                      onClick={() => skip(-1)}
+                    >
+                      <SkipIcon flip />
+                    </button>
+                    <button
+                      className="play"
+                      type="button"
+                      aria-label={guestNeedsSound ? 'Включить звук' : playing ? 'Пауза' : 'Слушать'}
+                      disabled={!hostLeads && armed}
+                      onClick={() => void togglePlay()}
+                    >
+                      {playing && !guestNeedsSound ? <PauseIcon /> : <PlayIcon />}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      aria-label="Следующий"
+                      disabled={!hostLeads}
+                      onClick={() => skip(1)}
+                    >
+                      <SkipIcon />
+                    </button>
+                  </div>
+                  <button
+                    className="icon-btn transport-loop"
+                    type="button"
+                    aria-label="По кругу"
+                    aria-pressed={looping}
+                    disabled={!hostLeads}
+                    onClick={toggleLoop}
+                  >
+                    <RepeatIcon />
+                  </button>
+                </div>
+              </div>
             </section>
-            <footer className="transport">
-              <div className="now">
-                <strong>{track?.title ?? '…'}</strong>
-                <span>
-                  {hostLeads
-                    ? 'Вы ведёте'
-                    : guestNeedsSound
-                      ? 'Нажмите слушать, чтобы включить звук'
-                      : 'Ведёт создатель комнаты'}
-                </span>
-              </div>
-              <div className="transport-actions">
-                <button
-                  className="icon-btn"
-                  type="button"
-                  aria-label="Предыдущий"
-                  disabled={!hostLeads}
-                  onClick={() => skip(-1)}
-                >
-                  <SkipIcon flip />
-                </button>
-                <button
-                  className="play"
-                  type="button"
-                  aria-label={guestNeedsSound ? 'Включить звук' : playing ? 'Пауза' : 'Слушать'}
-                  disabled={!hostLeads && armed}
-                  onClick={() => void togglePlay()}
-                >
-                  {playing && !guestNeedsSound ? <PauseIcon /> : <PlayIcon />}
-                </button>
-                <button
-                  className="icon-btn"
-                  type="button"
-                  aria-label="Следующий"
-                  disabled={!hostLeads}
-                  onClick={() => skip(1)}
-                >
-                  <SkipIcon />
-                </button>
-              </div>
-            </footer>
           </div>
 
           <aside className="side">
@@ -246,9 +217,7 @@ export default function App() {
                 </span>
               </div>
               <div className="person">
-                <span className="avatar" style={{ background: '#d24136' }}>
-                  В
-                </span>
+                <span className="avatar avatar--you">В</span>
                 <span>
                   <strong>Вы</strong>
                   <small>
@@ -257,7 +226,7 @@ export default function App() {
                 </span>
               </div>
               <div className="person">
-                <span className="avatar" style={{ background: '#785a46' }}>
+                <span className="avatar avatar--other">
                   {together
                     ? (role === 'host' ? guestLabel : hostPerson?.name || 'Создатель')
                         .slice(0, 1)
@@ -280,12 +249,12 @@ export default function App() {
                 </span>
               </div>
               {role === 'guest' ? (
-                <label className="field" style={{ padding: '8px 16px 12px' }}>
+                <label className="field field--name">
                   Как к вам обращаться
                   <input
                     value={guestName}
                     onChange={(event) => setGuestName(event.target.value)}
-                    placeholder="Гость"
+                    placeholder="Друг"
                   />
                 </label>
               ) : (
@@ -293,9 +262,7 @@ export default function App() {
                   <button className="btn btn--quiet" type="button" onClick={() => void copyLink()}>
                     {copyLabel}
                   </button>
-                  <p className="hint" style={{ marginTop: 8 }}>
-                    {shareOrigin}/#/room/{code}
-                  </p>
+                  <p className="hint">{shareOrigin}/#/room/{code}</p>
                 </div>
               )}
             </div>
@@ -306,15 +273,7 @@ export default function App() {
               <div className="messages">
                 {chat.map((item) => (
                   <div className="bubble" key={item.id}>
-                    <span
-                      className="avatar"
-                      style={{
-                        width: 28,
-                        height: 28,
-                        fontSize: '0.7rem',
-                        background: item.who === 'Вы' ? '#d24136' : '#785a46',
-                      }}
-                    >
+                    <span className={item.who === 'Вы' ? 'avatar avatar--you' : 'avatar avatar--other'}>
                       {item.who.slice(0, 1)}
                     </span>
                     <p>

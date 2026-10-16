@@ -1,39 +1,107 @@
+import { useId } from 'react'
+
+const CX = 64
+const CY = 62
+const R = 46
+
+function edge(y: number) {
+  const half = Math.sqrt(Math.max(0, R * R - (y - CY) ** 2))
+  return { left: CX - half, right: CX + half }
+}
+
+function curve(y: number, bow: number) {
+  const { left, right } = edge(y)
+  return `M ${left.toFixed(1)} ${y} Q ${CX} ${(y + bow).toFixed(1)} ${right.toFixed(1)} ${y}`
+}
+
+function ribbon(y: number, bow: number, thick: number) {
+  const top = edge(y)
+  const low = y + thick
+  const bottom = edge(low)
+  return [
+    `M ${top.left.toFixed(1)} ${y}`,
+    `Q ${CX} ${(y + bow).toFixed(1)} ${top.right.toFixed(1)} ${y}`,
+    `L ${bottom.right.toFixed(1)} ${low.toFixed(1)}`,
+    `Q ${CX} ${(low + bow * 0.9).toFixed(1)} ${bottom.left.toFixed(1)} ${low.toFixed(1)}`,
+    'Z',
+  ].join(' ')
+}
+
+const TURNS = [
+  { y: 22, bow: 2.4, thick: 8 },
+  { y: 35, bow: 3.6, thick: 9 },
+  { y: 49, bow: 4.6, thick: 10 },
+  { y: 64, bow: 4.4, thick: 10 },
+  { y: 79, bow: 3.2, thick: 9 },
+  { y: 93, bow: 2.2, thick: 7.5 },
+]
+
 export function YarnMark({ className }: { className?: string }) {
+  const raw = useId().replace(/:/g, '')
+  const wool = `klubok-wool-${raw}`
+  const ball = `klubok-ball-${raw}`
+
   return (
-    <svg className={className} viewBox="0 0 64 64" aria-hidden="true">
+    <svg className={className} viewBox="0 0 128 128" aria-hidden="true">
+      <defs>
+        <radialGradient id={wool} cx="36%" cy="32%" r="68%">
+          <stop offset="0%" stopColor="#f6c48a" />
+          <stop offset="52%" stopColor="#e07a34" />
+          <stop offset="100%" stopColor="#9a3822" />
+        </radialGradient>
+        <linearGradient id={`${wool}-cord`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#f8d7ae" />
+          <stop offset="42%" stopColor="#f0a15a" />
+          <stop offset="100%" stopColor="#c45a2c" />
+        </linearGradient>
+        <clipPath id={ball}>
+          <circle cx={CX} cy={CY} r={R} />
+        </clipPath>
+      </defs>
+      <ellipse cx="64" cy="116" rx="28" ry="4.2" fill="#785a46" opacity="0.2" />
+      <circle cx={CX} cy={CY} r={R} fill={`url(#${wool})`} />
+      <g clipPath={`url(#${ball})`}>
+        <ellipse cx="78" cy="78" rx="28" ry="22" fill="#6e2c18" opacity="0.18" />
+        {TURNS.map((turn) => (
+          <path key={`cord-${turn.y}`} d={ribbon(turn.y, turn.bow, turn.thick)} fill={`url(#${wool}-cord)`} />
+        ))}
+        {TURNS.map((turn) => (
+          <path
+            key={`sheen-${turn.y}`}
+            d={curve(turn.y + 1.4, turn.bow * 0.92)}
+            fill="none"
+            stroke="#fff6ec"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            opacity="0.8"
+          />
+        ))}
+        <g transform={`rotate(62 ${CX} ${CY})`}>
+          <path d={ribbon(56, 5.2, 8)} fill={`url(#${wool}-cord)`} />
+          <path
+            d={curve(57.4, 4.8)}
+            fill="none"
+            stroke="#fff6ec"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            opacity="0.75"
+          />
+        </g>
+      </g>
       <path
-        fill="#eb8a3e"
-        d="M32 8c12 0 22 9 22 22 0 16-12 26-22 26S10 46 10 30C10 17 20 8 32 8Z"
-      />
-      <path
+        d="M84 92c14 12 30 8 32-2 2.2-9-8-16-16-10"
         fill="none"
-        stroke="#f7ede0"
-        strokeWidth="3"
+        stroke="#c45a2c"
+        strokeWidth="6.2"
         strokeLinecap="round"
-        d="M22 24c8-8 22-6 24 8"
       />
       <path
+        d="M84 90.4c13 11 27 7.2 29-1.8 2-8-7-14-14-9"
         fill="none"
-        stroke="#d24136"
-        strokeWidth="3"
+        stroke="#f0a15a"
+        strokeWidth="3.4"
         strokeLinecap="round"
-        d="M18 32c7 12 22 12 28 1"
       />
-      <path
-        fill="none"
-        stroke="#f7ede0"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        d="M24 42c8 6 18 4 22-6"
-      />
-      <path
-        fill="none"
-        stroke="#c44732"
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        d="M20 28c10-9 24-2 22 10"
-      />
-      <ellipse cx="26" cy="22" rx="5" ry="3.2" fill="#f7ede0" opacity="0.45" />
     </svg>
   )
 }
@@ -99,6 +167,17 @@ export function SkipIcon({ flip }: { flip?: boolean }) {
       style={flip ? { transform: 'scaleX(-1)' } : undefined}
     >
       <path fill="currentColor" d="M4 5v12l8-6-8-6Zm9 0h2v12h-2V5Z" />
+    </svg>
+  )
+}
+
+export function RepeatIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M7.2 5h7.3l-1.6-1.6L14.3 2 19 6.7 14.3 11.4l-1.4-1.4L14.5 8.4H7.2A3.2 3.2 0 0 0 4 11.6v1.6H2v-1.6A5.2 5.2 0 0 1 7.2 5Zm7.6 12H7.5l1.6 1.6-1.4 1.4L3 15.3l4.7-4.7 1.4 1.4-1.6 1.6h7.3a3.2 3.2 0 0 0 3.2-3.2V9.2h2v1.6a5.2 5.2 0 0 1-5.2 5.2Z"
+      />
     </svg>
   )
 }
